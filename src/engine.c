@@ -1,6 +1,5 @@
 #include <sys/time.h>
 #include <x86intrin.h>  // for __rdtsc()
-
 #include "engine.h"
 
 // Chess pieces
@@ -1264,7 +1263,7 @@ void compute_next_move(void)
 
         int max = nega_alpha_beta(0, -400000, 400000, engine_side, best_sequence);
         engine_move = best_sequence[0];
-        if (engine_move.val == 0) {
+        if (max == -100000) {
             game_state = PAT_GS;
             return;
         }

@@ -104,7 +104,7 @@ static void load_game(void)
         if (fscanf(f, "%[^\n]", move_str) == EOF) break;
         fgetc(f);  // skip '\n'
         printf("play %d: move %s\n", play, move_str);
-        if (try_move_str(move_str) != 1) break;
+        if (try_move_str(move_str) < 1) break;
     }
     nb_plays = play;
     fclose(f);
@@ -220,32 +220,32 @@ static void graphical_inits(char* name)
     // Load the text fonts
     TTF_Init();
 
-    rw_hdl = SDL_RWFromConstMem( (void*) font_ttf, sizeof(font_ttf) );
-    s_font = TTF_OpenFontRW( rw_hdl, 1, 14);
-    if (s_font == NULL) exit_with_message( "error: small font not found" );
+    rw_hdl = SDL_RWFromConstMem((void*)font_ttf, sizeof(font_ttf));
+    s_font = TTF_OpenFontRW(rw_hdl, 1, 14);
+    if (s_font == NULL) exit_with_message("error: small font not found");
 
-    rw_hdl = SDL_RWFromConstMem( (void*) font_ttf, sizeof(font_ttf) );
-    m_font = TTF_OpenFontRW( rw_hdl, 1, 18);
-    if (m_font == NULL) exit_with_message( "error: medium font not found" );
+    rw_hdl = SDL_RWFromConstMem((void*)font_ttf, sizeof(font_ttf));
+    m_font = TTF_OpenFontRW(rw_hdl, 1, 18);
+    if (m_font == NULL) exit_with_message("error: medium font not found");
 
-    rw_hdl = SDL_RWFromConstMem( (void*) font_ttf, sizeof(font_ttf) );
-    font   = TTF_OpenFontRW( rw_hdl, 1, 20);
-    if (font == NULL) exit_with_message( "error: normal font not found" );
+    rw_hdl = SDL_RWFromConstMem((void*)font_ttf, sizeof(font_ttf));
+    font   = TTF_OpenFontRW(rw_hdl, 1, 20);
+    if (font == NULL) exit_with_message("error: normal font not found");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) 
-        graphical_exit( "SDL init error" );
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0)
+        graphical_exit("SDL init error");
 
     win = SDL_CreateWindow(name, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 712, 606, SDL_WINDOW_RESIZABLE);
-    if (!win) graphical_exit( "SDL window creation error" );
+    if (!win) graphical_exit("SDL window creation error");
 
     render = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!render) graphical_exit( "SDL render creation error");
+    if (!render) graphical_exit("SDL render creation error");
 
-    set_resizable_params(712, 606); // (712 for pieces drawing size of 60x60)
+    set_resizable_params(712, 606);  // (712 for pieces drawing size of 60x60)
 
     SDL_SetWindowHitTest(win, is_drag_or_resize_area, NULL);
 
-    SDL_SetWindowBordered( win, SDL_FALSE );
+    SDL_SetWindowBordered(win, SDL_FALSE);
 
     // Capture also 1st click event than regains the window
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
@@ -253,9 +253,9 @@ static void graphical_inits(char* name)
 
 static void put_text(TTF_Font* f, char* text, int x, int y)
 {
-    SDL_Color textColor = {40, 40, 40, 0};
+    SDL_Color textColor  = {40, 40, 40, 0};
     SDL_Surface* surface = TTF_RenderText_Blended(f, text, textColor);
-    SDL_Rect text_rect = { x - surface->w/2, y, surface->w, surface->h };
+    SDL_Rect text_rect   = {x - surface->w/2, y, surface->w, surface->h};
 
     text_texture = SDL_CreateTextureFromSurface(render, surface);
     SDL_FreeSurface(surface);
@@ -268,10 +268,10 @@ static int put_menu_text(char* text, int x, int y, int id)
 {
     int ret = 0;
 
-    SDL_Color textColor = {40, 40, 40, 0};
+    SDL_Color textColor  = {40, 40, 40, 0};
     SDL_Surface* surface = TTF_RenderText_Blended(font, text, textColor);
     if (x <= mx && mx < x + surface->w + 20 && y <= my && my < y + surface->h + 6) {
-        SDL_Rect rect = { x, y, surface->w + 20, surface->h + 6};
+        SDL_Rect rect = {x, y, surface->w + 20, surface->h + 6};
         SDL_SetRenderDrawColor(render, 250, 238, 203, 255);
         SDL_RenderFillRect(render, &rect);
         ret = id;
@@ -291,11 +291,11 @@ static void draw_piece(char piece, int x, int y)
     if (piece == ' ') return;
 
     // get piece zone in pieces PNG file
-    char* piece_ch = "pknbrqPKNBRQ";
-    int p = strchr(piece_ch, piece) - piece_ch;
-    SDL_Rect sprite = { p * PIECE_W, 0, PIECE_W, PIECE_W };
+    char* piece_ch  = "pknbrqPKNBRQ";
+    int p           = strchr(piece_ch, piece) - piece_ch;
+    SDL_Rect sprite = {p * PIECE_W, 0, PIECE_W, PIECE_W};
 
-    SDL_Rect dest   = { x, y, PIECE_W, PIECE_W};
+    SDL_Rect dest = {x, y, PIECE_W, PIECE_W};
     SDL_RenderCopy(render, tex, &sprite, &dest);
 }
 
@@ -366,16 +366,16 @@ static int display_board(int from64, int show_possible_moves, int prom64)
             else SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
             SDL_RenderFillRect(render, &rect);
 
-            if (sq64 == from64) continue; // Don't draw the piece being moved
+            if (sq64 == from64) continue;  // Don't draw the piece being moved
             char p = get_piece(l, c);
             if (sq64 == msq64 && ((play & 1) != !(p & 0x20)))
-                 draw_piece( p, rect.x + PIECE_M, rect.y + PIECE_M -3);
-            else draw_piece( p, rect.x + PIECE_M, rect.y + PIECE_M);
+                draw_piece(p, rect.x + PIECE_M, rect.y + PIECE_M - 3);
+            else draw_piece(p, rect.x + PIECE_M, rect.y + PIECE_M);
 
             if (show_possible_moves) {
                 if (get_possible_moves_board(l, c)) {
-                    mark.x = rect.x + SQUARE_W/2 -4;
-                    mark.y = rect.y + SQUARE_W/2 -4;
+                    mark.x = rect.x + SQUARE_W/2 - 4;
+                    mark.y = rect.y + SQUARE_W/2 - 4;
                     if ((l + c) & 1) SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
                     else             SDL_SetRenderDrawColor(render, 230, 217, 181, 255);
                     SDL_RenderFillRect(render, &mark);
@@ -503,15 +503,14 @@ static void move_animation(char* move)
     int x0 = 2*MARGIN + ((side_view) ? 7 - c0 : c0)*SQUARE_W + PIECE_M;
     int y0 = 2*MARGIN + ((side_view) ? l0 : 7 - l0)*SQUARE_W + PIECE_M -2; // -2 for a "lift" effect :)
 
-    int c = move[2] - 'a';
-    int l = move[3] - '1';
+    int c  = move[2] - 'a';
+    int l  = move[3] - '1';
     int dx = ((side_view) ? c0 - c : c - c0)*SQUARE_W;
     int dy = ((side_view) ? l - l0 : l0 - l)*SQUARE_W;
 
     user_undo_move();
-    for (int i = 1; i < 12; i++) {
-        display_all( 8*l0 + c0, x0 + (i*dx)/12, y0 + (i*dy)/12, -1);
-        SDL_Delay(5);
+    for (int i = 1; i < 8; i++) {
+        display_all(8 * l0 + c0, x0 + (i * dx) / 8, y0 + (i * dy) / 8, -1);
     }
     user_redo_move();
     display_all(-1, 0, 0, -1);
@@ -582,7 +581,7 @@ static int handle_user_turn(char* move_str)
         if (receive_move(move_str))
             if (try_move_str(move_str)) return ANIM_GS;
 
-        SDL_Delay((from64 >= 0) ? 5 : 50);
+        SDL_Delay(10);
 
         // Handle Mouse and keyboard events
         SDL_Event event;
