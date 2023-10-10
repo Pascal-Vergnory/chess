@@ -60,16 +60,17 @@ char en_passant[MAX_TURNS];
 char castles[MAX_TURNS + 2];  // (even index: white castle, odd index: black castle)
 
 // Move structure
-#define PROMOTE    1
-#define EN_PASSANT 2
+#define EN_PASSANT 1
+#define PROMO_N    2  // set to be KNIGHT - PAWN
 #define L_ROOK     3
 #define R_ROOK     4
-#define BR_CASTLE  5
-#define BL_CASTLE  6
-#define B_PAWN2    7
+#define PROMO_Q    5  // set to be QUEEN - PAWN
+#define BR_CASTLE  6
+#define BL_CASTLE  7
 #define WR_CASTLE  8
 #define WL_CASTLE  9
-#define W_PAWN2    10
+#define B_PAWN2    10
+#define W_PAWN2    11
 
 struct move_t {
     union {
@@ -187,8 +188,9 @@ void do_move(struct move_t m)
         B(70) = 0;
         B(73) = B_ROOK;
         break;
-    case PROMOTE:
-        B(m.to) |= QUEEN;
+    case PROMO_Q:
+    case PROMO_N:
+        B(m.to) += m.special;  // Because PROMO_Q = QUEEN - PAWN and PROMO_N = KNIGHT - PAWN
         break;
     case W_PAWN2:
         en_passant[play] = m.from + 10;  // notice "en passant" possibility
@@ -452,7 +454,8 @@ void main(void)
                     while (1) {
                         char ch = *(ptr + len - 1);
                         if (ch >= '1' && ch <= '8') break;
-                        if (ch >= 'b' && ch <= 'r') move.special = PROMOTE;  // TODO: support promotion to other than qween...
+                        if (ch == 'n') move.special = PROMO_N;
+                        else if (ch >= 'b' && ch <= 'r') move.special = PROMO_Q;  // TODO: support promotion to other than qween and knight ...
                         len--;
                     }
 

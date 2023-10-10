@@ -5,7 +5,7 @@
 #include "engine.h"
 
 char* message[14] = {
-    "it is white's turn to move", "it is black's turn to move",
+    "To the whites to play", "To the blacks to play",
     "check !",              "check !",
     "check mat !",          "check mat !",
     "you win !",            "you win !",
