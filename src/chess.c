@@ -13,6 +13,8 @@ char* message[14] = {
     "white Thinking...",    "black Thinking...",
     "white Playing this !", "black Playing this !"};
 
+int old_from64 = -1;
+
 void log_info(const char* str)
 {
     fputs(str, stdout);
@@ -324,6 +326,8 @@ static int mouse_to_sq64(int x, int y)
 #define MOUSE_OVER_TIME  11
 #define MOUSE_OVER_QPROM 12
 #define MOUSE_OVER_NPROM 13
+#define MOUSE_OVER_RPROM 14
+#define MOUSE_OVER_BPROM 15
 
 static int display_board(int from64, int show_possible_moves, int prom64)
 {
@@ -363,7 +367,7 @@ static int display_board(int from64, int show_possible_moves, int prom64)
             rect.x = 2*MARGIN + ((side_view) ? 7 - c : c)*SQUARE_W;
             rect.y = 2*MARGIN + ((side_view) ? l : 7 - l)*SQUARE_W;
             if ((l + c) & 1) SDL_SetRenderDrawColor(render, 230, 217, 181, 255);
-            else SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
+            else             SDL_SetRenderDrawColor(render, 176, 126,  83, 255);
             SDL_RenderFillRect(render, &rect);
 
             if (sq64 == from64) continue;  // Don't draw the piece being moved
@@ -372,14 +376,13 @@ static int display_board(int from64, int show_possible_moves, int prom64)
                 draw_piece(p, rect.x + PIECE_M, rect.y + PIECE_M - 3);
             else draw_piece(p, rect.x + PIECE_M, rect.y + PIECE_M);
 
-            if (show_possible_moves) {
-                if (get_possible_moves_board(l, c)) {
-                    mark.x = rect.x + SQUARE_W/2 - 4;
-                    mark.y = rect.y + SQUARE_W/2 - 4;
-                    if ((l + c) & 1) SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
-                    else             SDL_SetRenderDrawColor(render, 230, 217, 181, 255);
-                    SDL_RenderFillRect(render, &mark);
-                }
+            if ((!show_possible_moves && sq64 == old_from64)
+             || ( show_possible_moves && get_possible_moves_board(l, c))) {
+                mark.x = rect.x + SQUARE_W/2 - 4;
+                mark.y = rect.y + SQUARE_W/2 - 4;
+                if ((l + c) & 1) SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
+                else             SDL_SetRenderDrawColor(render, 230, 217, 181, 255);
+                SDL_RenderFillRect(render, &mark);
             }
         }
         ch = (side_view) ? 'h' - l : 'a' + l;
@@ -395,26 +398,30 @@ static int display_board(int from64, int show_possible_moves, int prom64)
         int c  = prom64 % 8;
         int up = (side_view == 0 && prom64 > 32) || (side_view && prom64 < 32);
         rect.x = MARGIN + MARGIN/2 + (side_view ? 7 - c : c) * SQUARE_W;
-        rect.y = MARGIN / 2 + (up ? 0 : 2*MARGIN + 6*SQUARE_W);
+        rect.y = MARGIN/2 + (up ? 0 : 2*MARGIN + 4*SQUARE_W);
         rect.w = MARGIN + SQUARE_W;
-        rect.h = MARGIN + 2*SQUARE_W;
+        rect.h = MARGIN + 4*SQUARE_W;
         SDL_SetRenderDrawColor(render, 250, 238, 203, 255);
         SDL_RenderFillRect(render, &rect);
 
         rect.x += MARGIN/2;
         rect.y += MARGIN/2;
         rect.w = SQUARE_W;
-        rect.h = 2*SQUARE_W;
+        rect.h = 4*SQUARE_W;
         SDL_SetRenderDrawColor(render, 230, 217, 181, 255);
         SDL_RenderFillRect(render, &rect);
 
         if (rect.x <= mx && mx < rect.x + rect.w) {
-            if (rect.y <= my && my < rect.y + SQUARE_W) ret = MOUSE_OVER_QPROM;
-            if (rect.y + SQUARE_W <= my && my < rect.y + 2 * SQUARE_W) ret = MOUSE_OVER_NPROM;
+            if (rect.y              <= my && my < rect.y +   SQUARE_W) ret = MOUSE_OVER_QPROM;
+            if (rect.y +   SQUARE_W <= my && my < rect.y + 2*SQUARE_W) ret = MOUSE_OVER_NPROM;
+            if (rect.y + 2*SQUARE_W <= my && my < rect.y + 3*SQUARE_W) ret = MOUSE_OVER_RPROM;
+            if (rect.y + 3*SQUARE_W <= my && my < rect.y + 4*SQUARE_W) ret = MOUSE_OVER_BPROM;
         }
 
         draw_piece(prom64 > 32 ? 'Q' : 'q', rect.x + PIECE_M, rect.y + PIECE_M - (ret == MOUSE_OVER_QPROM ? 3 : 0));
-        draw_piece(prom64 > 32 ? 'N' : 'n', rect.x + PIECE_M, rect.y + PIECE_M - (ret == MOUSE_OVER_NPROM ? 3 : 0) + SQUARE_W);
+        draw_piece(prom64 > 32 ? 'N' : 'n', rect.x + PIECE_M, rect.y + PIECE_M - (ret == MOUSE_OVER_NPROM ? 3 : 0) +   SQUARE_W);
+        draw_piece(prom64 > 32 ? 'R' : 'r', rect.x + PIECE_M, rect.y + PIECE_M - (ret == MOUSE_OVER_RPROM ? 3 : 0) + 2*SQUARE_W);
+        draw_piece(prom64 > 32 ? 'B' : 'b', rect.x + PIECE_M, rect.y + PIECE_M - (ret == MOUSE_OVER_BPROM ? 3 : 0) + 3*SQUARE_W);
     }
 
     return ret;
@@ -502,6 +509,7 @@ static void move_animation(char* move)
     int l0 = move[1] - '1';
     int x0 = 2*MARGIN + ((side_view) ? 7 - c0 : c0)*SQUARE_W + PIECE_M;
     int y0 = 2*MARGIN + ((side_view) ? l0 : 7 - l0)*SQUARE_W + PIECE_M -2; // -2 for a "lift" effect :)
+    old_from64 = 8*l0 + c0;
 
     int c  = move[2] - 'a';
     int l  = move[3] - '1';
@@ -510,7 +518,7 @@ static void move_animation(char* move)
 
     user_undo_move();
     for (int i = 1; i < 8; i++) {
-        display_all(8 * l0 + c0, x0 + (i * dx) / 8, y0 + (i * dy) / 8, -1);
+        display_all(old_from64, x0 + (i*dx) / 8, y0 + (i*dy) / 8, -1);
     }
     user_redo_move();
     display_all(-1, 0, 0, -1);
@@ -599,8 +607,8 @@ static int handle_user_turn(char* move_str)
                     switch (mouse_over) {
                     case MOUSE_OVER_NEW:  init_game(NULL); break;
                     case MOUSE_OVER_PLAY: return THINK_GS;
-                    case MOUSE_OVER_BACK: user_undo_move(); init_communications(); break;
-                    case MOUSE_OVER_FWD:  user_redo_move(); break;
+                    case MOUSE_OVER_BACK: old_from64 = -1; user_undo_move(); init_communications(); break;
+                    case MOUSE_OVER_FWD:  old_from64 = -1; user_redo_move(); break;
                     case MOUSE_OVER_BOOK: use_book = !use_book; break;
                     case MOUSE_OVER_RAND: randomize = !randomize; break;
                     case MOUSE_OVER_VERB: verbose = !verbose; break;
@@ -610,22 +618,19 @@ static int handle_user_turn(char* move_str)
                     }
                 }
                 else {
-                    // handle mouse over a button
+                    // handle mouse over a promotion choice
                     switch (mouse_over) {
-                    case MOUSE_OVER_QPROM:
-                        move_str[4] = 'q';
+                    case MOUSE_OVER_QPROM: move_str[4] = 'q'; break;
+                    case MOUSE_OVER_NPROM: move_str[4] = 'n'; break;
+                    case MOUSE_OVER_RPROM: move_str[4] = 'r'; break;
+                    case MOUSE_OVER_BPROM: move_str[4] = 'b'; break;
+                    default:               prom64 = -1;
+                    }
+                    if (prom64 >= 0) {
                         move_str[5] = 0;
                         try_move_str(move_str);
                         display_all(-1, 0, 0, -1);
                         return THINK_GS;
-                    case MOUSE_OVER_NPROM:
-                        move_str[4] = 'n';
-                        move_str[5] = 0;
-                        try_move_str(move_str);
-                        display_all(-1, 0, 0, -1);
-                        return THINK_GS;
-                    default:
-                        prom64 = -1;
                     }
                 }
                 refresh = 3;
@@ -635,6 +640,7 @@ static int handle_user_turn(char* move_str)
                 if (get_move_to(from64, to64, move_str)) {
                     ret = try_move_str(move_str);
                     if (ret == 1) {
+                        old_from64 = -1;
                         display_all(-1, 0, 0, -1);
                         return THINK_GS;
                     }
@@ -652,10 +658,12 @@ static int handle_user_turn(char* move_str)
             else if (event.type == SDL_KEYDOWN) {
                 char ch = (char)(event.key.keysym.sym);
                 if (event.key.keysym.sym == SDLK_LEFT) {        // undo
+                    old_from64 = -1; 
                     user_undo_move();
                     init_communications();
                 }
                 else if (event.key.keysym.sym == SDLK_RIGHT) {  // redo
+                    old_from64 = -1; 
                     user_redo_move();
                 }
                 else if (ch == 'v' || ch == 'm' || ch == 'h' || ch == SDLK_ESCAPE) {

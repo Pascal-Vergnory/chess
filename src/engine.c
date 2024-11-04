@@ -46,8 +46,8 @@ char *board_ptr = BOARD0;
 // Move structure and move tables
 #define EN_PASSANT 1
 #define PROMO_N    2  // set to be KNIGHT - PAWN
-#define L_ROOK     3
-#define R_ROOK     4
+#define PROMO_B    3  // set to be BISHOP - PAWN
+#define PROMO_R    4  // set to be ROOK - PAWN
 #define PROMO_Q    5  // set to be QUEEN - PAWN
 #define BR_CASTLE  6
 #define BL_CASTLE  7
@@ -55,6 +55,8 @@ char *board_ptr = BOARD0;
 #define WL_CASTLE  9
 #define B_PAWN2    10
 #define W_PAWN2    11
+#define L_ROOK     12
+#define R_ROOK     13
 
 typedef struct {
     union {
@@ -200,22 +202,24 @@ static int str_to_move(char *str, move_t *m)
     // Rebuild 'special'
     char type = B(m->from) & TYPE;
     if (type == KING) {
-        if (m->from == 4 && m->to == 6) m->special = WR_CASTLE;
-        else if (m->from == 4 && m->to == 2) m->special = WL_CASTLE;
+        if      (m->from ==  4 && m->to ==  6) m->special = WR_CASTLE;
+        else if (m->from ==  4 && m->to ==  2) m->special = WL_CASTLE;
         else if (m->from == 74 && m->to == 76) m->special = BR_CASTLE;
         else if (m->from == 74 && m->to == 72) m->special = BL_CASTLE;
     }
     else if (type <= PAWN) {
         if (m->to <= 7 || m->to >= 70) {
             m->special = PROMO_Q;
-            if (str[4] == 'n') m->special = PROMO_N;
+            if      (str[4] == 'b') m->special = PROMO_B;
+            else if (str[4] == 'n') m->special = PROMO_N;
+            else if (str[4] == 'r') m->special = PROMO_R;
         }
         else if (m->to - m->from == 20) m->special = W_PAWN2;
         else if (m->from - m->to == 20) m->special = B_PAWN2;
         else if (m->eaten == 0 && (m->to % 10) != (m->from % 10)) m->special = EN_PASSANT;
     }
     else if (type == ROOK) {
-        if (m->from == 0 || m->from == 70) m->special = L_ROOK;
+        if      (m->from == 0 || m->from == 70) m->special = L_ROOK;
         else if (m->from == 7 || m->from == 77) m->special = R_ROOK;
     }
     return 1;
@@ -228,8 +232,10 @@ static char *move_str(move_t m)
     if (m.val == 0) return "";
     sprintf(mv_str, "%c%c%c%c", 'a' + m.from % 10, '1' + m.from / 10,
             'a' + m.to % 10, '1' + m.to / 10);
-    if (m.special == PROMO_Q) sprintf(mv_str + 4, "q");
-    if (m.special == PROMO_N) sprintf(mv_str + 4, "n");
+    if      (m.special == PROMO_Q) sprintf(mv_str + 4, "q");
+    else if (m.special == PROMO_N) sprintf(mv_str + 4, "n");
+    else if (m.special == PROMO_R) sprintf(mv_str + 4, "r");
+    else if (m.special == PROMO_B) sprintf(mv_str + 4, "b");
     return mv_str;
 }
 
@@ -440,7 +446,9 @@ static void do_move(move_t m)
         break;
     case PROMO_Q:
     case PROMO_N:
-        B(m.to) += m.special;  // Because PROMO_Q = QUEEN - PAWN and PROMO_N = KNIGHT - PAWN
+    case PROMO_R:
+    case PROMO_B:
+        B(m.to) += m.special;            // PROMO_x defined so that this works
         board_val[play] -= piece_value[piece];
         board_val[play] += piece_value[piece | QUEEN];
         break;
@@ -635,6 +643,8 @@ static int check_pawn_move(int from, int to)
     if (to < 8 || to >= 70) {
         add_move(from, to, PROMO_Q);
         add_move(from, to, PROMO_N);
+        add_move(from, to, PROMO_R);
+        add_move(from, to, PROMO_B);
     }
     else add_move(from, to, 0);
     return 1;
@@ -651,6 +661,8 @@ static void check_wpawn_eat(int from, int to)
         if (to >= 70) {
             add_move(from, to, PROMO_Q);
             add_move(from, to, PROMO_N);
+            add_move(from, to, PROMO_R);
+            add_move(from, to, PROMO_B);
         }
         else add_move(from, to, 0);
     }
@@ -664,6 +676,8 @@ static void check_bpawn_eat(int from, int to)
         if (to < 8) {
             add_move(from, to, PROMO_Q);
             add_move(from, to, PROMO_N);
+            add_move(from, to, PROMO_R);
+            add_move(from, to, PROMO_B);
         }
         else add_move(from, to, 0);
     }
