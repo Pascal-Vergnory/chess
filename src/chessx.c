@@ -48,6 +48,7 @@ void send_str( const char* str )
     if (send_nl) fputs( "-> ", logfile);
     fputs( str, logfile );
     send_nl = !!strchr( str, '\n' );
+    if (send_nl) fflush(stdout);
 }
 
 //------------------------------------------------------------------------------------
