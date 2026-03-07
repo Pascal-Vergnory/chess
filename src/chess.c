@@ -133,6 +133,7 @@ static SDL_Renderer* render = NULL;
 static SDL_Texture*  text_texture = NULL;
 static int           mx, my, mb;  // mouse position & buttons
 static int           side_view = 0;
+static int           two_players = 0;
 
 static void exit_with_message(char* error_msg)
 {
@@ -185,7 +186,8 @@ SDL_HitTestResult is_drag_or_resize_area(SDL_Window* win, const SDL_Point* area,
         if (delta_y < 5) return SDL_HITTEST_DRAGGABLE;
         if (delta_y >= SQUARE_W - 5) return SDL_HITTEST_DRAGGABLE;
     }
-    if (3*MARGIN + 8*SQUARE_W <= area->x && 260 <= area->y && area->y < WINDOW_H - 72)
+    int side_upper_y = two_players ? 100 : 310;
+    if (3*MARGIN + 8*SQUARE_W <= area->x && side_upper_y <= area->y && area->y < WINDOW_H - 72)
         return SDL_HITTEST_DRAGGABLE;
 
     return SDL_HITTEST_NORMAL;
@@ -328,6 +330,7 @@ static int mouse_to_sq64(int x, int y)
 #define MOUSE_OVER_NPROM 13
 #define MOUSE_OVER_RPROM 14
 #define MOUSE_OVER_BPROM 15
+#define MOUSE_OVER_2PL   16
 
 static int display_board(int from64, int show_possible_moves, int prom64)
 {
@@ -438,6 +441,7 @@ static int put_cursor(long* val, long min, long max, int x, int y, int w, int id
     // Move the cursor if required
     if (mb == 1 && x + 4 <= mx && mx <= x + w - 4 && y <= my && my < y + 24) {
         *val = min + (mx - x - 4) * (max - min) / (w - 8);
+	*val = (*val / 250) * 250;
         ret  = id;
     }
 
@@ -473,10 +477,13 @@ static int display_all(int from64, int x, int y, int prom64)
     /* Display buttons and texts */
     if (WINDOW_W > WINDOW_H) {
         ret += put_menu_text("New",  TEXT_X, 40, MOUSE_OVER_NEW );
-        ret += put_menu_text("Play", TEXT_X, 80, MOUSE_OVER_PLAY);
-        ret += put_menu_text(use_book  ? "Use book" : "No book ", TEXT_X, 120, MOUSE_OVER_BOOK);
-        ret += put_menu_text(randomize ? "Random"  : "Ordered",   TEXT_X, 160, MOUSE_OVER_RAND);
-        ret += put_menu_text(verbose   ? "Verbose" : "No trace",  TEXT_X, 200, MOUSE_OVER_VERB);
+        ret += put_menu_text(two_players ? "2 players" : "1 player",  TEXT_X, 80, MOUSE_OVER_2PL);
+        if (two_players == 0) {
+            ret += put_menu_text("Play", TEXT_X, 120, MOUSE_OVER_PLAY);
+            ret += put_menu_text(use_book  ? "Use book" : "No book ", TEXT_X, 160, MOUSE_OVER_BOOK);
+            ret += put_menu_text(randomize ? "Random"  : "Ordered",   TEXT_X, 200, MOUSE_OVER_RAND);
+            ret += put_menu_text(verbose   ? "Verbose" : "No trace",  TEXT_X, 240, MOUSE_OVER_VERB);
+        }
         ret += put_menu_text("Quit", TEXT_X, WINDOW_H - 72, MOUSE_OVER_QUIT);
         ret += put_menu_text(" < ", MARGIN,                     WINDOW_H - 40, MOUSE_OVER_BACK);
         ret += put_menu_text(" > ", 3*MARGIN + 8*SQUARE_W - 36, WINDOW_H - 40, MOUSE_OVER_FWD);
@@ -497,7 +504,9 @@ static int display_all(int from64, int x, int y, int prom64)
     SDL_RenderDrawLine(render, WINDOW_W - 15, 15, WINDOW_W - 5, 5);
 
     // Draw the time cursor
-    ret += put_cursor(&time_budget_ms, 2000, 60000, TEXT_X, 240, MENU_W - MARGIN, MOUSE_OVER_TIME);
+
+    if (two_players == 0)
+        ret += put_cursor(&time_budget_ms, 500, 10000, TEXT_X, 280, MENU_W - MARGIN, MOUSE_OVER_TIME);
 
     SDL_RenderPresent(render);
     return ret;
@@ -612,6 +621,7 @@ static int handle_user_turn(char* move_str)
                     case MOUSE_OVER_BOOK: use_book = !use_book; break;
                     case MOUSE_OVER_RAND: randomize = !randomize; break;
                     case MOUSE_OVER_VERB: verbose = !verbose; break;
+                    case MOUSE_OVER_2PL:  two_players = !two_players; break;
                     case MOUSE_OVER_QUIT: return QUIT_GS;
                     case MOUSE_OVER_BB:   side_view = !side_view; break;
                     case MOUSE_OVER_BRD:  from64 = check_from(mouse_to_sq64(event.button.x, event.button.y));
@@ -716,15 +726,17 @@ int main(int argc, char* argv[])
             move_animation(move_str);
             game_state = THINK_GS;
         }
-        // To the program to play
-        SDL_Cursor* cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
-        SDL_SetCursor(cursor);
-        compute_next_move();
-        cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
-        SDL_SetCursor(cursor);
-        if (game_state <= MAT_GS) {
-            transmit_move(engine_move_str);
-            move_animation(engine_move_str);
+        if (two_players == 0) {
+            // To the program to play
+            SDL_Cursor* cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
+            SDL_SetCursor(cursor);
+            compute_next_move();
+            cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+            SDL_SetCursor(cursor);
+            if (game_state <= MAT_GS) {
+                transmit_move(engine_move_str);
+                move_animation(engine_move_str);
+            }
         }
     }
     if (play) save_game();
