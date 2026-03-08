@@ -31,6 +31,7 @@ extern int   trace;
 // Common variables : game current state
 
 extern int   game_state;
+extern int   game_eval;
 extern char* engine_move_str;
 extern int   play;
 extern int   nb_plays;
@@ -55,7 +56,7 @@ char* get_move_str( int play);
 void log_info( const char* str );
 void send_str( const char* str );
 
-#define log_info_va( ... ) do { char str_va[64]; sprintf( str_va, __VA_ARGS__); log_info(str_va); } while(0)
-#define send_str_va( ... ) do { char str_va[64]; sprintf( str_va, __VA_ARGS__); send_str(str_va); } while(0)
+#define log_info_va( ... ) do { char str_va[150]; sprintf( str_va, __VA_ARGS__); log_info(str_va); } while(0)
+#define send_str_va( ... ) do { char str_va[150]; sprintf( str_va, __VA_ARGS__); send_str(str_va); } while(0)
 
 #endif

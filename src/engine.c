@@ -99,6 +99,7 @@ static table_t table[TABLE_ENTRIES] __attribute__((aligned(16)));
 char *engine_move_str;
 
 int game_state = WAIT_GS;
+int game_eval  = 0;
 
 int play            = 0;
 int nb_plays        = 0;
@@ -239,7 +240,7 @@ static char *move_str(move_t m)
     return mv_str;
 }
 
-static char piece_char[33] = " .........PKNBRQ..pknbrq.........";
+static char piece_char[34] = " .........PKNBRQ..pknbrq.........";
 
 void set_piece(char ch, int l, int c)
 {
@@ -905,9 +906,9 @@ static int evaluate(int side, int a, int b)
     res = board_val[play];
 
     // If a piece has been eaten at the horizon, this is risky, so
-    // remove half of the value of the eating piece
+    // remove 1/4 of the value of the eating piece
     if (moved[play - 1].eaten)
-        res -= piece_value[(int)B(moved[play - 1].to)] / 2;
+        res -= piece_value[(int)B(moved[play - 1].to)] / 4;
 
     if (side == BLACK) {
         if (res > b + 170 || res < a - 170) return res;
@@ -920,32 +921,37 @@ static int evaluate(int side, int a, int b)
     for (sq = 0; sq < 78; sq++) {
         piece    = B(sq);
         int type = piece & TYPE;
-        //        if (type == QUEEN || type == ROOK || type == KING) continue;
-        if (type == KING) continue;
-        if (piece & BLACK) {
-            res += black_pos_bonus[sq];  // (will be inverted if side = WHITE)
+        if (type == 0) continue;
+        if (type != KING) {
+            if (piece & BLACK) {
+                res += black_pos_bonus[sq];  // (will be inverted if side = WHITE)
 
-            // Discourage own piece in front of pawn (including double pawn)
-            if (piece == B_PAWN && B(sq - 10) & BLACK) res -= 9;
+                // Discourage own piece in front of pawn (including double pawn)
+                if (piece == B_PAWN) {
+                    if (B(sq - 10) & BLACK) res -= 20;  // 20 mieux que 9!
+                    if (B(sq - 10) == B_PAWN) res -= 10;
+
+                    // Encourage pawns to advance to get promotion at end of game
+                    if (nb_pieces[play] < 32) res += (7 - (sq / 10)) << 4;  //  24 << 3
+                }
+            }
+            else if (piece & WHITE) {
+                res -= white_pos_bonus[sq];
+                if (piece == W_PAWN) {
+                    if (B(sq + 10) & WHITE) res += 20;  // 20 mieux que 9!
+                    if (B(sq + 10) == W_PAWN) res += 10;
+
+                    // Encourage pawns to advance to get promotion at end of game
+                    if (nb_pieces[play] < 32) res -= (sq / 10) << 4;  //  24 << 3
+                }
+            }
         }
-        else if (piece & WHITE) {
-            res -= white_pos_bonus[sq];
-            if (piece == W_PAWN && B(sq + 10) & WHITE) res += 9;
-        }
-    }
-
-    // Evaluations when there are few pieces
-    if (nb_pieces[play] < 24) {
-        for (sq = 0; sq < BOARD_SIZE - 2; sq++) {
-            piece = B(sq);
-
-            // Encourage pawns to advance to get promotion at end of game
-            if (piece == W_PAWN) res -= (sq / 10) << 3;
-            else if (piece == B_PAWN) res += (7 - (sq / 10)) << 3;
+        // King evaluations when there are few pieces
+        else if (nb_pieces[play] < 28) {
 
             // Discourage king to go in a corner
-            else if (piece == W_KING) res += king_pos_malus[sq];
-            else if (piece == B_KING) res -= king_pos_malus[sq];
+            if (piece == W_KING) res += king_pos_malus[sq];
+            else                 res -= king_pos_malus[sq];
         }
     }
     return (side == BLACK) ? res : -res;
@@ -1027,11 +1033,11 @@ static void fast_sort_moves(move_t* list, int nb_moves, int level, move_t table_
         else if (val == best_move[level].val)
             sorted_attacks[1] = val;
 
-        // Give the 2nd rank to the previous best move at this level (the "killer" move)
+        // Give the 3rd rank to the previous 2nd best move at this level (the 2nd "killer" move)
         else if (val == next_best[level].val)
             sorted_attacks[2] = val;
 
-        // place the attacking moves in a sparsely filled, but ordered list
+        // Place the attacking moves in a sparsely filled, but ordered list
         else if (list[m].eaten) {
             // get the index in the attack_indexes[] table (8*attacker + victim)
             i = ((B(list[m].from) & 7) << 3) + (list[m].eaten & 7);
@@ -1123,8 +1129,8 @@ static int nega_alpha_beta(int level, int a, int b, int side, move_t *upper_sequ
     // Try each possible move
     for (m = list_of_moves; m->val; m++) {
         // Once the max level reached, only evaluate "eating" moves. We'll stop
-        // on a "stablized" eating situation that will provide a better evaluation (algo 2)
-        //        if (level > level_max && B(m->to) == 0) continue;
+        // on a "stabilized" eating situation that will provide a better evaluation (algo 2)
+        //if (level >= level_max && m->eaten == 0 && m->special != EN_PASSANT) continue;
 
         // Futility pruning
         if (futility < max && one_possible && B(m->to) == 0) continue;
@@ -1202,7 +1208,7 @@ static int nega_alpha_beta(int level, int a, int b, int side, move_t *upper_sequ
         }
     }
     if (one_possible == 0)
-        return (side == engine_side) ? -100000 : 100000;  // Avoid "Pats"
+        return (side == engine_side) ? -100000 + level : 100000 - level;  // Avoid "Pats"
 
 end_add_to_tt:
     table[h].eval     = max;
@@ -1275,26 +1281,27 @@ void compute_next_move(void)
         nb_dedup                 = 0;
         nb_hash                  = 0;
 
-        int max = nega_alpha_beta(0, -400000, 400000, engine_side, best_sequence);
+        game_eval = nega_alpha_beta(0, -400000, 400000, engine_side, best_sequence);
         engine_move = best_sequence[0];
-        if (max == -100000) {
-            game_state = PAT_GS;
-            return;
-        }
 
         level_ms   = -elapsed_ms;
         elapsed_ms = get_chrono();
         level_ms  += elapsed_ms;
 
         if (verbose) {
-            send_str_va("%2d %7d %4ld %8d ", level_max, max, elapsed_ms / 10, ab_moves);
+            send_str_va(" %2d %7d %4ld %8d ", level_max, game_eval, elapsed_ms / 10, ab_moves);
             for (int l = 0; l < level_max && l < 13; l++)
                 send_str_va(" %s", move_str(best_sequence[l]));
             send_str("\n");
         }
 
+        if (game_eval == -100000) {
+            game_state = PAT_GS;
+            return;
+        }
+
         // If a check-mat is un-avoidable, no need to think more
-        if (max > 199800 || max < -199800) break;
+        if (game_eval > 199800 || game_eval < -199800) break;
 
         // Evaluate if we have time for the next search level
         if (level_ms * 4 > curr_budget_ms - elapsed_ms) break;
