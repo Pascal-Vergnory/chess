@@ -451,7 +451,7 @@ static void do_move(move_t m)
     case PROMO_B:
         B(m.to) += m.special;            // PROMO_x defined so that this works
         board_val[play] -= piece_value[piece];
-        board_val[play] += piece_value[piece | QUEEN];
+        board_val[play] += piece_value[piece + m.special];
         break;
     case W_PAWN2:
         en_passant[play] = m.from + 10;  // notice "en passant" possibility
