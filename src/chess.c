@@ -2,6 +2,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
+#include <math.h>
 #include "engine.h"
 
 char* message[14] = {
@@ -117,7 +118,7 @@ static void load_game(void)
 //------------------------------------------------------------------------------------
 
 #define MARGIN    20
-#define MENU_W   120
+#define MENU_W   130
 #define BOTTOM_M  44
 int SQUARE_W;
 int PIECE_W;
@@ -186,7 +187,7 @@ SDL_HitTestResult is_drag_or_resize_area(SDL_Window* win, const SDL_Point* area,
         if (delta_y < 5) return SDL_HITTEST_DRAGGABLE;
         if (delta_y >= SQUARE_W - 5) return SDL_HITTEST_DRAGGABLE;
     }
-    int side_upper_y = two_players ? 100 : 310;
+    int side_upper_y = two_players ? 100 : 290;
     if (3*MARGIN + 8*SQUARE_W <= area->x && side_upper_y <= area->y && area->y < WINDOW_H - 72)
         return SDL_HITTEST_DRAGGABLE;
 
@@ -274,8 +275,8 @@ static int put_menu_text(char* text, int x, int y, int id)
 
     SDL_Color textColor  = {40, 40, 40, 0};
     SDL_Surface* surface = TTF_RenderText_Blended(font, text, textColor);
+    SDL_Rect rect = {x, y, surface->w + 20, surface->h + 6};
     if (x <= mx && mx < x + surface->w + 20 && y <= my && my < y + surface->h + 6) {
-        SDL_Rect rect = {x, y, surface->w + 20, surface->h + 6};
         SDL_SetRenderDrawColor(render, 250, 238, 203, 255);
         SDL_RenderFillRect(render, &rect);
         ret = id;
@@ -438,20 +439,27 @@ static int put_cursor(long* val, long min, long max, int x, int y, int w, int id
     SDL_SetRenderDrawColor(render, 250, 238, 203, 255);
     SDL_RenderFillRect(render, &rect);
 
-    // Move the cursor if required
-    if (mb == 1 && x + 4 <= mx && mx <= x + w - 4 && y <= my && my < y + 24) {
-        *val = min + (mx - x - 4) * (max - min) / (w - 8);
-	*val = (*val / 250) * 250;
+    // Move the cursor if required (log scale)
+    if (mb == 1 && x <= mx && mx <= x + w && y <= my && my < y + 40) {
+        if (mx <= x + 4) *val = min;
+        else if (mx >= x + w - 4) *val = max;
+        else {
+            *val = (long) (min * exp((mx - x - 4) * log(max/min) / (w - 8)));
+            if (*val < 2000)       *val = (*val / 100) * 100;
+            else if (*val < 20000) *val = ((*val + 100) / 1000) * 1000;
+            else                   *val = ((*val + 1000) / 10000) * 10000;
+        }
         ret  = id;
     }
 
-    SDL_Rect rect2 = {x + (*val - min) * (w - 8) / (max - min), y, 8, 24};
+    SDL_Rect rect2 = {x + (int)((w-8)*log(*val/min)/log(max/min)), y, 8, 24};
     SDL_SetRenderDrawColor(render, 190, 180, 145, SDL_ALPHA_OPAQUE);
     SDL_RenderFillRect(render, &rect2);
 
     // Display the cursor value
     char str_val[10];
-    sprintf(str_val, "%d ms", (int)(*val));
+    if (*val < 2000) sprintf(str_val, "%0.1f s", (float)(*val)/1000.0);
+    else             sprintf(str_val, "%d s", (int)(*val/1000));
     put_text(m_font, str_val, x + w/2, y + 24);
 
     return ret;
@@ -480,9 +488,10 @@ static int display_all(int from64, int x, int y, int prom64)
         ret += put_menu_text(two_players ? "2 players" : "1 player",  TEXT_X, 80, MOUSE_OVER_2PL);
         if (two_players == 0) {
             ret += put_menu_text("Play", TEXT_X, 120, MOUSE_OVER_PLAY);
-            ret += put_menu_text(use_book  ? "Use book" : "No book ", TEXT_X, 160, MOUSE_OVER_BOOK);
-            ret += put_menu_text(randomize ? "Random"  : "Ordered",   TEXT_X, 200, MOUSE_OVER_RAND);
-            ret += put_menu_text(verbose   ? "Verbose" : "No trace",  TEXT_X, 240, MOUSE_OVER_VERB);
+            ret += put_cursor(&time_budget_ms, 200, 60000, TEXT_X + MENU_W/2, 120, MENU_W/2 - MARGIN, MOUSE_OVER_TIME);
+            ret += put_menu_text(use_book  ? "Use book" : "No book ", TEXT_X, 180, MOUSE_OVER_BOOK);
+            ret += put_menu_text(randomize ? "Random"  : "Ordered",   TEXT_X, 220, MOUSE_OVER_RAND);
+            ret += put_menu_text(verbose   ? "Verbose" : "No trace",  TEXT_X, 260, MOUSE_OVER_VERB);
         }
         ret += put_menu_text("Quit", TEXT_X, WINDOW_H - 72, MOUSE_OVER_QUIT);
         ret += put_menu_text(" < ", MARGIN,                     WINDOW_H - 40, MOUSE_OVER_BACK);
@@ -502,11 +511,6 @@ static int display_all(int from64, int x, int y, int prom64)
     else SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
     SDL_RenderDrawLine(render, WINDOW_W - 15, 5, WINDOW_W - 5, 15);
     SDL_RenderDrawLine(render, WINDOW_W - 15, 15, WINDOW_W - 5, 5);
-
-    // Draw the time cursor
-
-    if (two_players == 0)
-        ret += put_cursor(&time_budget_ms, 500, 10000, TEXT_X, 280, MENU_W - MARGIN, MOUSE_OVER_TIME);
 
     SDL_RenderPresent(render);
     return ret;

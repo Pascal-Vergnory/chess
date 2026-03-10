@@ -62,8 +62,8 @@ char castles[MAX_TURNS + 2];  // (even index: white castle, odd index: black cas
 // Move structure
 #define EN_PASSANT 1
 #define PROMO_N    2  // set to be KNIGHT - PAWN
-#define L_ROOK     3
-#define R_ROOK     4
+#define PROMO_B    3  // set to be BISHOP - PAWN
+#define PROMO_R    4  // set to be ROOK - PAWN
 #define PROMO_Q    5  // set to be QUEEN - PAWN
 #define BR_CASTLE  6
 #define BL_CASTLE  7
@@ -71,6 +71,8 @@ char castles[MAX_TURNS + 2];  // (even index: white castle, odd index: black cas
 #define WL_CASTLE  9
 #define B_PAWN2    10
 #define W_PAWN2    11
+#define L_ROOK     12
+#define R_ROOK     13
 
 struct move_t {
     union {
@@ -190,7 +192,9 @@ void do_move(struct move_t m)
         break;
     case PROMO_Q:
     case PROMO_N:
-        B(m.to) += m.special;  // Because PROMO_Q = QUEEN - PAWN and PROMO_N = KNIGHT - PAWN
+    case PROMO_R:
+    case PROMO_B:
+        B(m.to) += m.special;            // PROMO_x defined so that this works
         break;
     case W_PAWN2:
         en_passant[play] = m.from + 10;  // notice "en passant" possibility
@@ -200,7 +204,7 @@ void do_move(struct move_t m)
         break;
     case EN_PASSANT:  // eat "en passant"
         if (piece == W_PAWN) B(m.to - 10) = 0;
-        else B(m.to + 10) = 0;
+        else                 B(m.to + 10) = 0;
         break;
     case L_ROOK:
         castles[play + 1] &= ~LEFT_CASTLE;
@@ -454,8 +458,10 @@ void main(void)
                     while (1) {
                         char ch = *(ptr + len - 1);
                         if (ch >= '1' && ch <= '8') break;
-                        if (ch == 'n') move.special = PROMO_N;
-                        else if (ch >= 'b' && ch <= 'r') move.special = PROMO_Q;  // TODO: support promotion to other than qween and knight ...
+                        if      (ch == 'q') move.special = PROMO_Q;
+                        else if (ch == 'n') move.special = PROMO_N;
+                        else if (ch == 'r') move.special = PROMO_R;
+                        else if (ch == 'b') move.special = PROMO_B;
                         len--;
                     }
 
