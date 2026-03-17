@@ -1,5 +1,6 @@
 #include <sys/time.h>
 #include <x86intrin.h>  // for __rdtsc()
+#include <pthread.h>
 #include "engine.h"
 
 // Chess pieces
@@ -260,9 +261,13 @@ void set_piece(char ch, int l, int c)
     if (ch == 'K') king_pos[(play + 1) & ~1] = 10 * l + c;
 }
 
-char get_piece(int l, int c)
+char get_piece(int l, int c, int ply)
 {
-    return piece_char[(int)(B(10 * l + c))];
+    if (l < 0 || l > 7 || c < 0 || c > 7) return ' ';
+    if (ply < 0 || ply > MAX_TURNS) return ' ';
+
+    char* b_ptr = BOARD0 + BOARD_AND_BORDER_SIZE * ply + 10 * l + c;
+    return piece_char[(int)(*b_ptr)];
 }
 
 char *get_move_str(int p)
@@ -489,7 +494,14 @@ void user_redo_move(void)
 {
     if (play >= nb_plays) return;
     play++;
-    board_ptr += BOARD_AND_BORDER_SIZE;
+    board_ptr = BOARD0 + BOARD_AND_BORDER_SIZE * play;
+}
+
+void set_play(int p)
+{
+    if (p < 0 || p > nb_plays) return;
+    play      = p;
+    board_ptr = BOARD0 + BOARD_AND_BORDER_SIZE * play;
 }
 
 //------------------------------------------------------------------------------------
@@ -812,35 +824,51 @@ static int in_check_mat(int side)
 // Routines to display the possible moves from a starting position
 //------------------------------------------------------------------------------------
 
-char possible_moves_board[80];
-void set_possible_moves_board(int l, int c)
+char possible_moves_board[64*64];
+
+#define POSSIBLE_MOVES_AREA BOARD0 + BOARD_AND_BORDER_SIZE * (MAX_TURNS-3)
+
+
+void set_possible_moves_board(void)
 {
     move_t move, list_of_moves[28];
     move_t* m;
+    printf("Setting possible moves board for play=%d\n", play);
+
+    // Copy the current board to a temporary area
+    board_ptr = BOARD0 + BOARD_AND_BORDER_SIZE * play;
+    memcpy (POSSIBLE_MOVES_AREA, board_ptr, BOARD_SIZE);
+    board_ptr = POSSIBLE_MOVES_AREA;
 
     memset((void*) possible_moves_board, 0, sizeof(possible_moves_board));
 
-    move.from = 10*l + c;
+    for (int from64 = 0; from64 < 64; from64++) {
+        int l = from64 / 8;
+        int c = from64 % 8;
+        move.from = 10*l + c;
 
-    // Side check
-    int side = (play & 1) ? BLACK : WHITE;
-    if ((B(move.from) & COLORS) != side) return;
+        // Side check
+        int side = (play & 1) ? BLACK : WHITE;
+        if ((B(move.from) & COLORS) != side) continue;
 
-    // List pseudo-legal moves
-    move_ptr = list_of_moves;
-    list_moves(move.from);
+        // List pseudo-legal moves
+        move_ptr = list_of_moves;
+        list_moves(move.from);
 
-    // Keep only legal moves
-    for (m = list_of_moves; m < move_ptr; m++) {
-        do_move(*m);
-        possible_moves_board[m->to] = (in_check(side, king_pos[play + 1])) ? 0 : 1;
-        undo_move();
+        // Keep only legal moves
+        for (m = list_of_moves; m < move_ptr; m++) {
+            do_move(*m);
+            int sq64 = 8*(m->to / 10) + (m->to % 10);
+            possible_moves_board[64*from64 + sq64] = (in_check(side, king_pos[play + 1])) ? 0 : 1;
+            undo_move();
+        }
     }
+    board_ptr = BOARD0 + BOARD_AND_BORDER_SIZE * play;
 }
 
-char get_possible_moves_board(int l, int c)
+char get_possible_moves_board(int from64, int sq64)
 {
-    return possible_moves_board[10*l + c];
+    return possible_moves_board[64*from64 + sq64];
 }
 
 //------------------------------------------------------------------------------------
@@ -870,6 +898,8 @@ static int try_move(move_t move, int side)
 
 int try_move_str(char *move_str)
 {
+    board_ptr = BOARD0 + BOARD_AND_BORDER_SIZE * play;
+
     move_t move;
     if (str_to_move(move_str, &move) == 0) return -1;
 
@@ -1061,6 +1091,7 @@ static void fast_sort_moves(move_t* list, int nb_moves, int level, move_t table_
 // The min-max recursive algo with alpha-beta pruning
 //------------------------------------------------------------------------------------
 
+static int ponder = 0;
 static int level_max;
 static int ab_moves, next_ab_moves_time_check;
 
@@ -1164,13 +1195,6 @@ static int nega_alpha_beta(int level, int a, int b, int side, move_t *upper_sequ
         // undo the move to evaluate the others
         undo_move();
 
-        // Every 10000 moves, look at elapsed time
-        if (++ab_moves > next_ab_moves_time_check) {
-            // if time's up, stop search and keep previous lower depth search move
-            if (get_chrono() >= curr_budget_ms) return -400000;
-            next_ab_moves_time_check = ab_moves + 10000;
-        }
-
         // Penalty on certain 1st moves
         if (level == 0) {
             char type = B(m->from) & TYPE;
@@ -1206,6 +1230,14 @@ static int nega_alpha_beta(int level, int a, int b, int side, move_t *upper_sequ
             if (max >= b) goto end_add_to_tt;
             if (max > a) a = max;
         }
+
+        // Every 10000 moves, check if we must stop (time up or ponder hit)
+        if (++ab_moves > next_ab_moves_time_check) {
+            if (ponder) pthread_testcancel();
+            // if time's up, stop search and keep previous lower depth search move
+            else if (get_chrono() >= curr_budget_ms) return -400000;
+            next_ab_moves_time_check = ab_moves + 10000;
+        }
     }
     if (one_possible == 0)
         return (side == engine_side) ? -100000 + level : 100000 - level;  // Avoid "Pats"
@@ -1228,6 +1260,7 @@ void compute_next_move(void)
 {
     move_t engine_move;
     long level_ms = 0, elapsed_ms = 0;
+    ponder = 0;
 
     engine_side = (play & 1) ? BLACK : WHITE;
 
@@ -1322,4 +1355,60 @@ play_the_prefered_move:
 
     // Return with the opponent side situation
     game_state = in_check_mat(engine_side ^ COLORS);
+}
+
+
+//------------------------------------------------------------------------------------
+// The compute engine : ponder while the player is thinking
+//------------------------------------------------------------------------------------
+
+void* ponder_thread(void* arg)
+{
+    (void)arg;
+    ponder = 1;
+
+    engine_side = (play & 1) ? BLACK : WHITE;
+
+    // Verify the situation...
+    if (in_check_mat(engine_side) == MAT_GS) {
+        game_state = LOST_GS;
+        return NULL;
+    }
+
+    // Keep best moves from previous search
+    for (int l = 0; l < level_max; l++) {
+        best_move[l].val = best_move[l+1].val;
+        next_best[l].val = next_best[l+1].val;
+    }
+
+    // Search deeper and deeper the best move,
+    // starting with the previous "best" move to improve prunning
+
+    level_max = 0;
+    do {
+        best_move[level_max].val = 0;
+        next_best[level_max].val = 0;
+        level_max++;
+        ab_moves                 = 0;
+        next_ab_moves_time_check = ab_moves + 10000;
+        nb_dedup                 = 0;
+        nb_hash                  = 0;
+
+        game_eval = nega_alpha_beta(0, -400000, 400000, engine_side, best_sequence);
+
+        if (game_eval == -100000) {
+            game_eval = 0;
+            return NULL;
+        }
+
+        // Update evaluation for the GUI
+        communicate_ponder((play & 1) ? -game_eval : game_eval);
+        pthread_testcancel();
+
+        // If a check-mat is un-avoidable, no need to think more
+        if (game_eval > 199800 || game_eval < -199800) break;
+
+    } while (level_max <= LEVEL_MAX);
+
+    return NULL;
 }

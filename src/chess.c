@@ -2,19 +2,23 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
+#include <pthread.h>
 #include <math.h>
 #include "engine.h"
 
 char* message[14] = {
     "To the whites to play", "To the blacks to play",
     "check !",              "check !",
-    "check mat !",          "check mat !",
     "you win !",            "you win !",
+    "check mat !",          "check mat !",
     "I am Pat",             "I am Pat",
     "white Thinking...",    "black Thinking...",
     "white Playing this !", "black Playing this !"};
 
-int old_from64 = -1;
+static int current_play = 0;
+static int two_players = 0;
+static int do_ponder = 1;
+static int ponder_eval = 0;
 
 void log_info(const char* str)
 {
@@ -55,7 +59,7 @@ static int receive_move(char* move)
 {
     char str[40];
     int p;
-    char* file_name = (play & 1) ? "black_move.chs" : "white_move.chs";
+    char* file_name = (current_play & 1) ? "black_move.chs" : "white_move.chs";
     struct stat bstat;
     if (stat(file_name, &bstat) != 0) return 0;
 
@@ -69,8 +73,8 @@ static int receive_move(char* move)
     remove(file_name);
     while (stat(file_name, &bstat) == 0) continue;
 
-    if (p != play) {
-        printf("Received move %s for play %d but play is %d\n", str, p, play);
+    if (p != current_play) {
+        printf("Received move %s for play %d but play is %d\n", str, p, current_play);
         return 0;
     }
     memcpy(move, str, 5);
@@ -134,7 +138,7 @@ static SDL_Renderer* render = NULL;
 static SDL_Texture*  text_texture = NULL;
 static int           mx, my, mb;  // mouse position & buttons
 static int           side_view = 0;
-static int           two_players = 0;
+static int           old_from64 = -1;
 
 static void exit_with_message(char* error_msg)
 {
@@ -338,6 +342,8 @@ static int display_board(int from64, int show_possible_moves, int prom64)
     SDL_Rect full_window = {0, 0, WINDOW_W, WINDOW_H};
     SDL_Rect rect        = {MARGIN, MARGIN, 8*SQUARE_W + 2*MARGIN, 8*SQUARE_W + 2*MARGIN};
     SDL_Rect mark        = {0, 0, 8, 8};
+    SDL_Rect u_eval_rect = {2*MARGIN + 8*SQUARE_W + 4, 2*MARGIN, MARGIN-8, 4*SQUARE_W};
+    SDL_Rect d_eval_rect = {2*MARGIN + 8*SQUARE_W + 4, 2*MARGIN + 4*SQUARE_W, MARGIN-8, 4*SQUARE_W};
     char ch;
 
     // Detect if the mouse is over the board or its border
@@ -375,13 +381,13 @@ static int display_board(int from64, int show_possible_moves, int prom64)
             SDL_RenderFillRect(render, &rect);
 
             if (sq64 == from64) continue;  // Don't draw the piece being moved
-            char p = get_piece(l, c);
-            if (sq64 == msq64 && ((play & 1) != !(p & 0x20)))
+            char p = get_piece(l, c, current_play);
+            if (sq64 == msq64 && ((current_play & 1) != !(p & 0x20)))
                 draw_piece(p, rect.x + PIECE_M, rect.y + PIECE_M - 3);
             else draw_piece(p, rect.x + PIECE_M, rect.y + PIECE_M);
 
             if ((!show_possible_moves && sq64 == old_from64)
-             || ( show_possible_moves && get_possible_moves_board(l, c))) {
+             || ( show_possible_moves && get_possible_moves_board(from64, sq64))) {
                 mark.x = rect.x + SQUARE_W/2 - 4;
                 mark.y = rect.y + SQUARE_W/2 - 4;
                 if ((l + c) & 1) SDL_SetRenderDrawColor(render, 176, 126, 83, 255);
@@ -395,7 +401,30 @@ static int display_board(int from64, int show_possible_moves, int prom64)
 
         ch = (side_view) ? '1' + l : '8' - l;
         put_text(f, &ch, 3*MARGIN/2, 2*MARGIN + SQUARE_W/2 + indices_dy + l*SQUARE_W);
-        put_text(f, &ch, 5*MARGIN/2 + 8*SQUARE_W, 2*MARGIN + SQUARE_W/2 + indices_dy + l*SQUARE_W);
+
+        // Display the evaluation bars
+        if (do_ponder ) {
+            float v = (float)abs(ponder_eval);
+            if (v < 100.0) v /= 200.0;
+            else if (v > 198000) v = 4.0;
+            else if (v > 100.0) v = log2(v/50.0)/2.0;
+            if (v > 4.0) v = 4.0;
+            int h = (int)(v * SQUARE_W);
+            if (ponder_eval < 0) h = -h;
+            if (side_view) h = -h;
+            u_eval_rect.h = 4*SQUARE_W - h;
+            d_eval_rect.h = 4*SQUARE_W + h;
+            d_eval_rect.y = 2*MARGIN + 4*SQUARE_W - h;
+
+            SDL_SetRenderDrawColor(render, 176, 126,  83, 255);
+            if (side_view) SDL_RenderFillRect(render, &d_eval_rect);
+            else           SDL_RenderFillRect(render, &u_eval_rect);
+            SDL_SetRenderDrawColor(render, 230, 217, 181, 255);
+            if (side_view) SDL_RenderFillRect(render, &u_eval_rect);
+            else           SDL_RenderFillRect(render, &d_eval_rect);
+        }
+        else
+            put_text(f, &ch, 5*MARGIN/2 + 8*SQUARE_W, 2*MARGIN + SQUARE_W/2 + indices_dy + l*SQUARE_W);
     }
 
     if (prom64 >= 0) {
@@ -439,7 +468,7 @@ static int put_cursor(long* val, long min, long max, int x, int y, int w, int id
     SDL_SetRenderDrawColor(render, 250, 238, 203, 255);
     SDL_RenderFillRect(render, &rect);
 
-    // Move the cursor if required (log scale)
+    // Move the cursor if required
     if (mb == 1 && x <= mx && mx <= x + w && y <= my && my < y + 40) {
         if (mx <= x + 4) *val = min;
         else if (mx >= x + w - 4) *val = max;
@@ -477,7 +506,7 @@ static int display_all(int from64, int x, int y, int prom64)
 
     /* If a piece is picked by the user or is moved by move_animation(), draw it */
     if (from64 >= 0 && prom64 < 0) {
-        char piece = get_piece(from64 / 8, from64 % 8);
+        char piece = get_piece(from64 / 8, from64 % 8, current_play);
         if (x || y) draw_piece(piece, x, y);
         else        draw_piece(piece, mx - PIECE_W/2, my - PIECE_W/2);
     }
@@ -489,14 +518,14 @@ static int display_all(int from64, int x, int y, int prom64)
         if (two_players == 0) {
             ret += put_menu_text("Play", TEXT_X, 120, MOUSE_OVER_PLAY);
             ret += put_cursor(&time_budget_ms, 200, 60000, TEXT_X + MENU_W/2, 120, MENU_W/2 - MARGIN, MOUSE_OVER_TIME);
-            ret += put_menu_text(use_book  ? "Use book" : "No book ", TEXT_X, 180, MOUSE_OVER_BOOK);
-            ret += put_menu_text(randomize ? "Random"  : "Ordered",   TEXT_X, 220, MOUSE_OVER_RAND);
-            ret += put_menu_text(verbose   ? "Verbose" : "No trace",  TEXT_X, 260, MOUSE_OVER_VERB);
+            ret += put_menu_text(use_book  ? "Use book" : "No book ", TEXT_X, 200, MOUSE_OVER_BOOK);
+            ret += put_menu_text(randomize ? "Random"  : "Ordered",   TEXT_X, 240, MOUSE_OVER_RAND);
+            ret += put_menu_text(verbose   ? "Verbose" : "No trace",  TEXT_X, 280, MOUSE_OVER_VERB);
         }
         ret += put_menu_text("Quit", TEXT_X, WINDOW_H - 72, MOUSE_OVER_QUIT);
         ret += put_menu_text(" < ", MARGIN,                     WINDOW_H - 40, MOUSE_OVER_BACK);
         ret += put_menu_text(" > ", 3*MARGIN + 8*SQUARE_W - 36, WINDOW_H - 40, MOUSE_OVER_FWD);
-        sprintf(msg_str, "Play %d : %s", play + 1, message[2*game_state + (play & 1)]);
+        sprintf(msg_str, "Play %d : %s", current_play + 1, message[2*game_state + (current_play & 1)]);
         put_text(font, msg_str, 2*MARGIN + 4*SQUARE_W, WINDOW_H - 34);
     }
 
@@ -556,6 +585,19 @@ static void debug_actions(char ch)
 }
 
 //------------------------------------------------------------------------------------
+// Pondering thread
+//------------------------------------------------------------------------------------
+
+void communicate_ponder( int eval )
+{
+    SDL_Event event;
+    event.type = SDL_USEREVENT;
+    event.user.code = 0;
+    event.user.data1 = (void*)(intptr_t)eval;
+    SDL_PushEvent(&event);
+}
+
+//------------------------------------------------------------------------------------
 // Handle external actions (user, other program)
 //------------------------------------------------------------------------------------
 
@@ -564,12 +606,10 @@ static int check_from(int sq64)
     if (sq64 < 0) return -1;
 
     // The player must pick one of his pieces
-    char ch = get_piece(sq64 / 8, sq64 % 8);
+    char ch = get_piece(sq64 / 8, sq64 % 8, current_play);
     if (ch == ' ') return -1;
-    if ((play & 1) && !(ch & 0x20)) return -1;
-    if (!(play & 1) && (ch & 0x20)) return -1;
-
-    set_possible_moves_board(sq64 / 8, sq64 % 8);
+    if ((current_play & 1) && !(ch & 0x20)) return -1;
+    if (!(current_play & 1) && (ch & 0x20)) return -1;
     return sq64;
 }
 
@@ -586,6 +626,20 @@ static int get_move_to(int from64, int to64, char* move_str)
     return 1;
 }
 
+pthread_t thread;
+
+static void user_turn_init(void)
+{
+    old_from64 = -1;
+    current_play = play;
+    set_possible_moves_board();
+    if (do_ponder) {
+        printf("Launching ponder thread for 2 players mode\n");
+        pthread_create(&thread, NULL, ponder_thread, NULL);
+    }
+}
+
+
 static int handle_user_turn(char* move_str)
 {
     int mouse_over, ret;
@@ -593,39 +647,61 @@ static int handle_user_turn(char* move_str)
     int prom64  = -1;  // -1 = "no promotion choice"
     int refresh =  1;
 
+    user_turn_init();
+
     while (1) {
         // Refresh the display
         if (refresh) mouse_over = display_all(from64, 0, 0, prom64);
         refresh = 0;
 
-        // Check if a program sent us its move
-        if (receive_move(move_str))
-            if (try_move_str(move_str)) return ANIM_GS;
-
+        if(two_players == 0) {
+            // Check if a program sent us its move
+            if (receive_move(move_str)) {
+                pthread_cancel(thread);
+                pthread_join(thread, NULL);
+                set_play(current_play);
+                if (try_move_str(move_str)) {
+                    do_ponder = 1;
+                    return ANIM_GS;
+                }
+            }
+        }
         SDL_Delay(10);
 
         // Handle Mouse and keyboard events
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             // Event is 'Quit'
-            if (event.type == SDL_QUIT) return QUIT_GS;
+            if (event.type == SDL_QUIT) {
+                if (do_ponder) {
+                    pthread_cancel(thread);
+                    pthread_join(thread, NULL);
+                    set_play(current_play);
+                }
+                return QUIT_GS;
+            }
 
             // Event is a mouse click
             if (event.type == SDL_MOUSEMOTION) refresh = 2;
 
             // Event is a mouse click
             else if (event.type == SDL_MOUSEBUTTONDOWN) {
+                if (do_ponder) {
+                    pthread_cancel(thread);
+                    pthread_join(thread, NULL);
+                    set_play(current_play);
+                }
                 if (prom64 < 0) {
                     // handle mouse over a button
                     switch (mouse_over) {
-                    case MOUSE_OVER_NEW:  init_game(NULL); break;
-                    case MOUSE_OVER_PLAY: return THINK_GS;
-                    case MOUSE_OVER_BACK: old_from64 = -1; user_undo_move(); init_communications(); break;
-                    case MOUSE_OVER_FWD:  old_from64 = -1; user_redo_move(); break;
+                    case MOUSE_OVER_NEW:  init_game(NULL); user_turn_init(); break;
+                    case MOUSE_OVER_PLAY: do_ponder = 1; return THINK_GS;
+                    case MOUSE_OVER_BACK: old_from64 = -1; user_undo_move(); init_communications(); do_ponder = 0; user_turn_init(); break;
+                    case MOUSE_OVER_FWD:  old_from64 = -1; user_redo_move(); do_ponder = (play >= nb_plays && two_players == 0) ? 1 : 0; user_turn_init(); break;
                     case MOUSE_OVER_BOOK: use_book = !use_book; break;
                     case MOUSE_OVER_RAND: randomize = !randomize; break;
                     case MOUSE_OVER_VERB: verbose = !verbose; break;
-                    case MOUSE_OVER_2PL:  two_players = !two_players; break;
+                    case MOUSE_OVER_2PL:  two_players = !two_players; do_ponder = (play >= nb_plays && two_players == 0) ? 1 : 0; break;
                     case MOUSE_OVER_QUIT: return QUIT_GS;
                     case MOUSE_OVER_BB:   side_view = !side_view; break;
                     case MOUSE_OVER_BRD:  from64 = check_from(mouse_to_sq64(event.button.x, event.button.y));
@@ -653,9 +729,12 @@ static int handle_user_turn(char* move_str)
                 int to64 = mouse_to_sq64(event.button.x, event.button.y);
                 if (get_move_to(from64, to64, move_str)) {
                     ret = try_move_str(move_str);
+                    printf("User move: %s -> %d\n", move_str, ret);
                     if (ret == 1) {
                         old_from64 = -1;
+                        current_play = play;
                         display_all(-1, 0, 0, -1);
+                        do_ponder = (two_players == 0) ? 1 : 0;
                         return THINK_GS;
                     }
                     if (ret == 2) {  // Handle pawn promotion
@@ -670,15 +749,24 @@ static int handle_user_turn(char* move_str)
 
             // Event is a keyboard input
             else if (event.type == SDL_KEYDOWN) {
+                if(do_ponder) {
+                    pthread_cancel(thread);
+                    pthread_join(thread, NULL);
+                    set_play(current_play);
+                }
                 char ch = (char)(event.key.keysym.sym);
                 if (event.key.keysym.sym == SDLK_LEFT) {        // undo
                     old_from64 = -1; 
                     user_undo_move();
                     init_communications();
+                    do_ponder = 0;
+                    user_turn_init();
                 }
                 else if (event.key.keysym.sym == SDLK_RIGHT) {  // redo
                     old_from64 = -1; 
                     user_redo_move();
+                    do_ponder = (play >= nb_plays && two_players == 0) ? 1 : 0;
+                    user_turn_init();
                 }
                 else if (ch == 'v' || ch == 'm' || ch == 'h' || ch == SDLK_ESCAPE) {
                     WINDOW_W = 2*WINDOW_H + MENU_W - WINDOW_W;  // toggle view mode
@@ -696,6 +784,12 @@ static int handle_user_turn(char* move_str)
                     set_resizable_params(event.window.data1, event.window.data2);
                     refresh = 6;
                 }
+            }
+            else if (event.type == SDL_USEREVENT) {
+                if (event.user.code == 0) {  // ponder thread finished computing
+                    ponder_eval = (int)(intptr_t)event.user.data1;
+                }
+                refresh = 7;
             }
         }
     }
