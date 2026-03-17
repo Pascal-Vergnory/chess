@@ -20,8 +20,8 @@ gcc src/bin_to_h.c -o bin_to_h
 ./bin_to_h resources/Chess_Pieces.svg src/pieces_svg.h
 rm bin_to_h
 
-# For gdb replace -s option (strip) by -g (gdb)
-gcc src/chess.c src/engine.c -o chess -Wall -Wextra -Wimplicit-fallthrough=0 -Wpedantic `sdl2-config --libs` -lpthread -lSDL2_image -lSDL2_ttf -O3 -DWITH_BOOK -s
+# For gdb replace -s option (strip) by -g (gdb). -lm when including math.h
+gcc src/chess.c src/engine.c -o chess -Wall -Wextra -Wimplicit-fallthrough=0 -Wpedantic `sdl2-config --libs` -lpthread -lSDL2_image -lSDL2_ttf -lm -O3 -DWITH_BOOK -s
 
 rm src/font_ttf.h
 rm src/pieces_svg.h
